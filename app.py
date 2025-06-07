@@ -5,23 +5,12 @@ from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 
-# pykrx import with proper error handling
+# pykrx import with error handling
 try:
     import pykrx.stock as stock
     PYKRX_AVAILABLE = True
-    st.sidebar.success("✅ 실제 데이터 모드")
 except ImportError as e:
     PYKRX_AVAILABLE = False
-    st.sidebar.error("❌ pykrx 설치 실패")
-    st.sidebar.write(f"Error: {str(e)}")
-
-# plotly import
-try:
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
 
 class TurtleTradingSystem:
     """터틀 트레이딩 시스템 메인 클래스"""
@@ -36,7 +25,7 @@ class TurtleTradingSystem:
     def convert_to_tickers(self, user_inputs):
         """사용자 입력을 종목코드로 변환"""
         if not PYKRX_AVAILABLE:
-            st.error("⚠️ pykrx가 설치되지 않아 실제 데이터를 사용할 수 없습니다.")
+            st.error("⚠️ pykrx를 사용할 수 없습니다. 로컬 환경에서 실행해주세요.")
             return {}
         
         result = {}
@@ -46,7 +35,7 @@ class TurtleTradingSystem:
             try:
                 with st.spinner("종목 리스트 로딩 중..."):
                     st.session_state.all_tickers = stock.get_market_ticker_list()
-                    st.sidebar.info(f"총 {len(st.session_state.all_tickers)}개 종목 로드됨")
+                    st.success(f"✅ {len(st.session_state.all_tickers)}개 종목 데이터 로드")
             except Exception as e:
                 st.error(f"종목 리스트 로딩 실패: {str(e)}")
                 return {}
@@ -65,7 +54,7 @@ class TurtleTradingSystem:
                     else:
                         st.warning(f"종목코드 {user_input}에 해당하는 종목을 찾을 수 없습니다.")
                 except Exception as e:
-                    st.warning(f"종목코드 {user_input} 조회 실패: {str(e)}")
+                    st.warning(f"종목코드 {user_input} 조회 실패")
             else:
                 # 종목명으로 검색
                 found = False
@@ -80,14 +69,14 @@ class TurtleTradingSystem:
                             break
                         
                         search_count += 1
-                        if search_count > 100:  # 너무 많이 검색하지 않도록 제한
+                        if search_count > 50:  # 검색 제한
                             break
                             
                     except:
                         continue
                 
                 if not found:
-                    st.warning(f"종목명 '{user_input}'을 찾을 수 없습니다. 정확한 종목명이나 종목코드를 입력해주세요.")
+                    st.warning(f"종목명 '{user_input}'을 찾을 수 없습니다.")
         
         return result
     
@@ -188,7 +177,6 @@ class TurtleTradingSystem:
                 
                 results.append(result)
             else:
-                # 데이터 가져오기 실패한 종목 기록
                 st.warning(f"⚠️ {name}({ticker}) 데이터 수집 실패")
             
             progress_bar.progress((i + 1) / len(tickers_dict))
@@ -233,7 +221,7 @@ class PositionManager:
     def update_positions(self, turtle_system):
         """포지션 현재가 업데이트 (실제 데이터 사용)"""
         if not st.session_state.user_positions or not PYKRX_AVAILABLE:
-            return
+            return 0
         
         updated_count = 0
         
@@ -269,7 +257,7 @@ class PositionManager:
                         updated_count += 1
                         
                 except Exception as e:
-                    st.warning(f"포지션 {position['종목명']} 업데이트 실패: {str(e)}")
+                    st.warning(f"포지션 {position['종목명']} 업데이트 실패")
         
         return updated_count
     
@@ -279,113 +267,46 @@ class PositionManager:
             st.session_state.user_positions[position_index]['상태'] = '청산완료'
             st.session_state.user_positions[position_index]['청산일'] = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-def create_chart(df, ticker_name):
-    """Plotly 차트 생성"""
-    if not PLOTLY_AVAILABLE:
-        st.warning("Plotly가 설치되지 않아 간단한 차트를 표시합니다.")
-        # Streamlit 내장 차트 사용
-        chart_data = pd.DataFrame({
-            '종가': df['종가'],
-            'Donchian 상단': df['donchian_upper'],
-            'Donchian 하단': df['donchian_lower']
-        })
-        st.line_chart(chart_data)
-        st.bar_chart(df['거래량'])
-        return
+def create_simple_chart(df, ticker_name):
+    """Streamlit 내장 차트를 사용한 간단한 차트"""
+    st.subheader(f"📊 {ticker_name} 차트 분석")
     
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.1,
-        subplot_titles=[f'{ticker_name} - 터틀 트레이딩 신호', '거래량'],
-        row_heights=[0.7, 0.3]
-    )
+    # 가격 차트 - 최근 30일만 표시
+    recent_df = df.tail(30)
     
-    # 캔들스틱 차트
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,
-            open=df['시가'],
-            high=df['고가'],
-            low=df['저가'],
-            close=df['종가'],
-            name='Price'
-        ),
-        row=1, col=1
-    )
+    chart_data = pd.DataFrame({
+        '종가': recent_df['종가'],
+        'Donchian상단': recent_df['donchian_upper'],
+        'Donchian하단': recent_df['donchian_lower']
+    })
     
-    # Donchian Channels
-    fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df['donchian_upper'],
-            mode='lines',
-            name='Donchian Upper (20)',
-            line=dict(color='red', width=2, dash='dash')
-        ),
-        row=1, col=1
-    )
+    st.line_chart(chart_data)
     
-    fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df['donchian_lower'],
-            mode='lines',
-            name='Donchian Lower (10)',
-            line=dict(color='blue', width=2, dash='dash')
-        ),
-        row=1, col=1
-    )
+    # 거래량 차트
+    st.subheader("📊 거래량")
+    st.bar_chart(recent_df['거래량'])
     
-    # 진입/청산 신호
-    entry_signals = df[df['entry_signal']]
-    if not entry_signals.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=entry_signals.index,
-                y=entry_signals['종가'],
-                mode='markers',
-                name='진입신호',
-                marker=dict(symbol='triangle-up', size=12, color='green')
-            ),
-            row=1, col=1
-        )
+    # 신호 정보
+    entry_signals = recent_df[recent_df['entry_signal']]
+    exit_signals = recent_df[recent_df['exit_signal']]
     
-    exit_signals = df[df['exit_signal']]
-    if not exit_signals.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=exit_signals.index,
-                y=exit_signals['종가'],
-                mode='markers',
-                name='청산신호',
-                marker=dict(symbol='triangle-down', size=12, color='red')
-            ),
-            row=1, col=1
-        )
+    signal_col1, signal_col2 = st.columns(2)
     
-    # 거래량
-    colors = ['red' if vol > df['volume_ma5'].iloc[i] * 1.5 else 'lightblue' 
-              for i, vol in enumerate(df['거래량'])]
+    with signal_col1:
+        if not entry_signals.empty:
+            st.success(f"📈 진입 신호: {len(entry_signals)}회")
+            if len(entry_signals) <= 5:
+                st.write("발생일:", entry_signals.index.strftime('%m-%d').tolist())
+        else:
+            st.info("📈 최근 진입 신호 없음")
     
-    fig.add_trace(
-        go.Bar(
-            x=df.index,
-            y=df['거래량'],
-            name='거래량',
-            marker_color=colors
-        ),
-        row=2, col=1
-    )
-    
-    fig.update_layout(
-        title=f'{ticker_name} 터틀 트레이딩 분석',
-        xaxis_rangeslider_visible=False,
-        height=700,
-        showlegend=True
-    )
-    
-    return fig
+    with signal_col2:
+        if not exit_signals.empty:
+            st.warning(f"📉 청산 신호: {len(exit_signals)}회")
+            if len(exit_signals) <= 5:
+                st.write("발생일:", exit_signals.index.strftime('%m-%d').tolist())
+        else:
+            st.info("📉 최근 청산 신호 없음")
 
 def main():
     """메인 Streamlit 앱"""
@@ -397,28 +318,34 @@ def main():
     
     # 헤더
     st.title("🐢 터틀 트레이딩 시스템")
-    st.markdown("**한국 주식시장을 위한 체계적 추세추종 전략 (실제 데이터 사용)**")
+    st.markdown("**한국 주식시장을 위한 체계적 추세추종 전략**")
     
     # pykrx 상태 확인
-    if not PYKRX_AVAILABLE:
+    if PYKRX_AVAILABLE:
+        st.success("✅ 한국거래소 실시간 데이터 연결")
+    else:
         st.error("""
-        ⚠️ **pykrx 패키지를 사용할 수 없습니다**
+        ❌ **pykrx 패키지를 사용할 수 없습니다**
         
-        이 앱은 한국거래소의 실제 데이터가 필요합니다. 
-        로컬에서 실행하려면 다음 명령어로 pykrx를 설치해주세요:
+        이 앱은 한국거래소의 실제 데이터가 필요합니다.
+        현재 Streamlit Cloud에서 pykrx 설치에 문제가 있을 수 있습니다.
         
-        ```bash
-        pip install pykrx
-        ```
+        **해결 방법:**
+        1. 로컬 환경에서 실행: `pip install pykrx streamlit`
+        2. 코드 다운로드 후 로컬에서 `streamlit run app.py`
         """)
-        st.stop()
     
-    st.success("✅ 한국거래소 실제 데이터 연결됨")
     st.markdown("---")
     
     # 사이드바 설정
     with st.sidebar:
         st.header("⚙️ 시스템 설정")
+        
+        # 연결 상태 표시
+        if PYKRX_AVAILABLE:
+            st.success("🟢 pykrx 연결됨")
+        else:
+            st.error("🔴 pykrx 연결 실패")
         
         # 터틀 시스템 초기화
         if 'turtle_system' not in st.session_state:
@@ -452,27 +379,51 @@ def main():
             if not active_positions.empty:
                 total_investment = active_positions['투자금액'].sum()
                 total_pnl = active_positions['손익'].sum()
-                total_return = (total_pnl / total_investment * 100) if total_investment > 0 else 0
                 
                 st.metric("총 투자금", f"{total_investment:,}원")
                 st.metric("총 손익", f"{total_pnl:+,}원")
-                st.metric("수익률", f"{total_return:+.2f}%")
         else:
             st.info("포지션이 없습니다.")
         
         st.markdown("---")
-        
-        # 빠른 도움말
-        with st.expander("📖 사용법"):
-            st.markdown("""
-            **1단계**: 종목 입력 후 신호 분석
-            **2단계**: 진입 신호 확인
-            **3단계**: 실제 매수 후 포지션 기록
-            **4단계**: 정기적 현재가 업데이트
-            **5단계**: 청산 신호시 매도 실행
-            """)
+        st.markdown("### 📝 빠른 도움말")
+        st.markdown("""
+        **1단계**: 종목 입력 후 신호 분석  
+        **2단계**: 진입 신호 확인  
+        **3단계**: 실제 매수 후 포지션 기록  
+        **4단계**: 정기적 현재가 업데이트  
+        **5단계**: 청산 신호시 매도 실행
+        """)
     
-    # 메인 탭
+    # 메인 탭 구성
+    if not PYKRX_AVAILABLE:
+        # pykrx 없을 때는 안내만
+        st.warning("현재 실제 데이터를 사용할 수 없어 기능이 제한됩니다.")
+        
+        with st.expander("💻 로컬 환경에서 실행하기", expanded=True):
+            st.markdown("""
+            **터미널에서 다음 명령어 실행:**
+            
+            ```bash
+            # 1. 패키지 설치
+            pip install streamlit pandas numpy pykrx
+            
+            # 2. 앱 코드 저장 (app.py)
+            # GitHub에서 코드 다운로드 또는 복사
+            
+            # 3. 앱 실행
+            streamlit run app.py
+            ```
+            
+            **로컬 실행시 모든 기능 사용 가능:**
+            - ✅ 실시간 한국거래소 데이터
+            - ✅ 완전한 포지션 관리
+            - ✅ 신호 분석 및 차트
+            """)
+        
+        return
+    
+    # 정상 기능 탭들
     tab1, tab2, tab3, tab4 = st.tabs([
         "📈 신호 분석", 
         "💼 포지션 관리", 
@@ -488,21 +439,20 @@ def main():
         
         with col_input:
             user_input = st.text_area(
-                "분석할 종목을 입력하세요 (종목명 또는 종목코드)",
-                placeholder="삼성전자\n005930\nNAVER\n카카오\nSK하이닉스",
-                height=120,
-                help="종목명(예: 삼성전자) 또는 종목코드(예: 005930)를 줄바꿈으로 구분하여 입력"
+                "분석할 종목을 입력하세요",
+                placeholder="삼성전자\n005930\nNAVER\n카카오",
+                height=120
             )
         
         with col_example:
             st.markdown("**📝 입력 예시**")
             st.code("""삼성전자
-NAVER
+NAVER  
 005930
 카카오
-LG화학""")
+SK하이닉스""")
         
-        if st.button("🔍 실시간 신호 분석 시작", type="primary", use_container_width=True):
+        if st.button("🔍 실시간 신호 분석 시작", type="primary"):
             if user_input.strip():
                 user_inputs = [x.strip() for x in user_input.split('\n') if x.strip()]
                 
@@ -510,29 +460,25 @@ LG화학""")
                     tickers_dict = turtle_system.convert_to_tickers(user_inputs)
                 
                 if tickers_dict:
-                    st.success(f"✅ {len(tickers_dict)}개 종목 확인됨: {', '.join(tickers_dict.values())}")
+                    st.success(f"✅ {len(tickers_dict)}개 종목 확인: {', '.join(tickers_dict.values())}")
                     
-                    # 신호 분석 실행
+                    # 신호 분석
                     with st.spinner("실시간 데이터 분석 중..."):
                         results_df = turtle_system.analyze_signals(tickers_dict)
                     
                     if not results_df.empty:
-                        # 분석 결과 저장
                         st.session_state['analysis_results'] = results_df
                         st.session_state['tickers_dict'] = tickers_dict
                         
-                        # 진입 신호 종목 우선 표시
+                        # 진입 신호 종목
                         entry_signals = results_df[results_df['진입신호'] == True]
                         
                         if not entry_signals.empty:
                             st.success(f"🎯 **진입 신호 발생: {len(entry_signals)}개 종목**")
                             
                             for idx, row in entry_signals.iterrows():
-                                with st.expander(
-                                    f"🟢 {row['종목명']} ({row['종목코드']}) - 진입 신호 발생!", 
-                                    expanded=True
-                                ):
-                                    # 종목 정보 표시
+                                with st.expander(f"🟢 {row['종목명']} - 진입 신호!", expanded=True):
+                                    # 종목 정보
                                     info_col1, info_col2, info_col3, info_col4 = st.columns(4)
                                     
                                     with info_col1:
@@ -544,53 +490,38 @@ LG화학""")
                                     with info_col4:
                                         st.metric("거래량", f"{row['거래량']:,}")
                                     
-                                    # 추가 정보
-                                    col_add1, col_add2 = st.columns(2)
-                                    with col_add1:
-                                        st.info(f"**다음 매수가**: {row['추가매수1']:,}원 (+0.5N)")
-                                    with col_add2:
-                                        volume_surge_text = "🔥 급증" if row['거래량급증'] else "📊 정상"
-                                        st.info(f"**거래량 상태**: {volume_surge_text}")
-                                    
                                     st.markdown("---")
-                                    st.markdown("##### 💰 실제 매수 후 포지션 기록")
+                                    st.markdown("##### 💰 매수 기록 입력")
                                     
                                     # 포지션 입력 폼
                                     pos_col1, pos_col2, pos_col3 = st.columns([2, 2, 1])
                                     
                                     with pos_col1:
                                         actual_price = st.number_input(
-                                            "실제 매수가 (원)",
+                                            "실제 매수가",
                                             value=int(row['현재가']),
                                             step=100,
-                                            key=f"price_{row['종목코드']}",
-                                            help="증권사에서 실제 체결된 가격을 입력하세요"
+                                            key=f"price_{row['종목코드']}"
                                         )
                                     
                                     with pos_col2:
                                         quantity = st.number_input(
-                                            "매수 수량 (주)",
+                                            "매수 수량",
                                             min_value=1,
                                             value=10,
                                             step=1,
-                                            key=f"qty_{row['종목코드']}",
-                                            help="실제 매수한 주식 수량을 입력하세요"
+                                            key=f"qty_{row['종목코드']}"
                                         )
                                     
                                     with pos_col3:
                                         st.markdown("<br>", unsafe_allow_html=True)
-                                        if st.button(
-                                            "➕ 포지션 추가", 
-                                            key=f"add_{row['종목코드']}", 
-                                            type="primary",
-                                            help="실제 매수 완료 후 클릭하세요"
-                                        ):
+                                        if st.button(f"➕ 포지션 추가", key=f"add_{row['종목코드']}", type="primary"):
                                             if actual_price > 0 and quantity > 0:
                                                 if 'position_manager' not in st.session_state:
                                                     st.session_state['position_manager'] = PositionManager()
                                                 
                                                 position_manager = st.session_state['position_manager']
-                                                new_position = position_manager.add_position(
+                                                position_manager.add_position(
                                                     row['종목코드'],
                                                     row['종목명'],
                                                     actual_price,
@@ -598,10 +529,70 @@ LG화학""")
                                                     row['ATR(N)']
                                                 )
                                                 
-                                                st.success(f"✅ {row['종목명']} 포지션이 성공적으로 추가되었습니다!")
+                                                st.success(f"✅ {row['종목명']} 포지션 추가!")
                                                 st.balloons()
                                                 st.rerun()
-                                            else:
-                                                st.error("올바른 매수가와 수량을 입력해주세요.")
-                                    
-                                    # 투자 정보
+                        else:
+                            st.info("🔍 현재 진입 신호가 없습니다.")
+                        
+                        # 전체 결과 표시
+                        st.markdown("---")
+                        st.subheader("📊 전체 분석 결과")
+                        
+                        # 요약 통계
+                        entry_count = results_df['진입신호'].sum()
+                        exit_count = results_df['청산신호'].sum()
+                        volume_surge_count = results_df['거래량급증'].sum()
+                        
+                        summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+                        with summary_col1:
+                            st.metric("분석 종목", len(results_df))
+                        with summary_col2:
+                            st.metric("진입 신호", entry_count)
+                        with summary_col3:
+                            st.metric("청산 신호", exit_count)
+                        with summary_col4:
+                            st.metric("거래량 급증", volume_surge_count)
+                        
+                        # 결과 테이블
+                        display_df = results_df[['종목명', '현재가', 'ATR(N)', '진입신호', '청산신호', '손절가']].copy()
+                        
+                        st.dataframe(
+                            display_df,
+                            column_config={
+                                '현재가': st.column_config.NumberColumn('현재가', format='%d원'),
+                                'ATR(N)': st.column_config.NumberColumn('ATR(N)', format='%.2f'),
+                                '손절가': st.column_config.NumberColumn('손절가', format='%d원'),
+                                '진입신호': st.column_config.CheckboxColumn('진입신호'),
+                                '청산신호': st.column_config.CheckboxColumn('청산신호')
+                            },
+                            use_container_width=True
+                        )
+                    else:
+                        st.error("분석 결과를 생성할 수 없습니다.")
+                else:
+                    st.error("입력하신 종목을 찾을 수 없습니다.")
+            else:
+                st.warning("분석할 종목을 입력해주세요.")
+    
+    with tab2:
+        st.header("💼 포지션 관리")
+        
+        # 관리 도구
+        if st.session_state.get('user_positions'):
+            tool_col1, tool_col2, tool_col3 = st.columns(3)
+            
+            with tool_col1:
+                if st.button("🔄 현재가 업데이트"):
+                    if 'position_manager' not in st.session_state:
+                        st.session_state['position_manager'] = PositionManager()
+                    
+                    with st.spinner("현재가 업데이트 중..."):
+                        updated_count = st.session_state['position_manager'].update_positions(turtle_system)
+                        st.success(f"✅ {updated_count}개 포지션 업데이트!")
+                        st.rerun()
+            
+            with tool_col2:
+                if st.button("💾 백업 저장"):
+                    positions_df = pd.DataFrame(st.session_state.user_positions)
+                    csv = positions_df.to_csv(
