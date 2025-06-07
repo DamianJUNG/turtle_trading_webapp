@@ -595,4 +595,284 @@ SK하이닉스""")
             with tool_col2:
                 if st.button("💾 백업 저장"):
                     positions_df = pd.DataFrame(st.session_state.user_positions)
-                    csv = positions_df.to_csv(
+                    csv = positions_df.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        label="📄 CSV 다운로드",
+                        data=csv,
+                        file_name=f"turtle_positions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv"
+                    )
+            
+            with tool_col3:
+                if st.button("🗑️ 전체 초기화"):
+                    if st.checkbox("정말 모든 데이터를 삭제하시겠습니까?"):
+                        st.session_state.user_positions = []
+                        st.success("모든 포지션이 삭제되었습니다.")
+                        st.rerun()
+        
+        # 포지션 목록
+        if st.session_state.get('user_positions'):
+            positions_df = pd.DataFrame(st.session_state.user_positions)
+            
+            # 상태별 분류
+            active_positions = positions_df[positions_df['상태'] == '보유중']
+            signal_positions = positions_df[positions_df['상태'].str.contains('청산신호', na=False)]
+            closed_positions = positions_df[positions_df['상태'] == '청산완료']
+            
+            # 보유중 포지션
+            if not active_positions.empty:
+                st.subheader("🟢 보유중 포지션")
+                
+                for original_idx in active_positions.index:
+                    position = active_positions.loc[original_idx]
+                    
+                    profit_emoji = "🟢" if position['손익'] >= 0 else "🔴"
+                    profit_text = f"{position['손익']:+,}원 ({position['손익률']:+.2f}%)"
+                    
+                    with st.expander(f"{profit_emoji} {position['종목명']} | {position['수량']}주 | {profit_text}"):
+                        # 상세 정보
+                        detail_col1, detail_col2, detail_col3 = st.columns(3)
+                        
+                        with detail_col1:
+                            st.write(f"**진입일**: {position['진입일']}")
+                            st.write(f"**진입가**: {position['진입가']:,}원")
+                            st.write(f"**현재가**: {position['현재가']:,}원")
+                        
+                        with detail_col2:
+                            st.write(f"**수량**: {position['수량']:,}주")
+                            st.write(f"**투자금액**: {position['투자금액']:,}원")
+                            st.write(f"**ATR(N)**: {position['ATR(N)']}")
+                        
+                        with detail_col3:
+                            st.write(f"**손절가**: {position['손절가']:,}원")
+                            if position['다음매수가'] > 0:
+                                st.write(f"**다음매수가**: {position['다음매수가']:,}원")
+                            else:
+                                st.write("**최종단계**: 추가매수 없음")
+                        
+                        # 청산 버튼
+                        if st.button(f"❌ 청산", key=f"close_{original_idx}"):
+                            if 'position_manager' not in st.session_state:
+                                st.session_state['position_manager'] = PositionManager()
+                            
+                            # 해당 포지션의 실제 인덱스 찾기
+                            for i, p in enumerate(st.session_state.user_positions):
+                                if p['포지션ID'] == position['포지션ID']:
+                                    st.session_state['position_manager'].close_position(i)
+                                    break
+                            
+                            st.success(f"{position['종목명']} 포지션 청산 완료!")
+                            st.rerun()
+            
+            # 청산 신호 포지션
+            if not signal_positions.empty:
+                st.subheader("🚨 청산 신호 발생")
+                
+                for original_idx in signal_positions.index:
+                    position = signal_positions.loc[original_idx]
+                    signal_type = "손절" if "손절" in position['상태'] else "익절"
+                    
+                    st.error(f"""
+                    🚨 **{position['종목명']} - {signal_type} 신호!**
+                    - 현재가: {position['현재가']:,}원
+                    - 손익: {position['손익']:+,}원 ({position['손익률']:+.2f}%)
+                    - **즉시 매도를 고려하세요!**
+                    """)
+            
+            # 청산 완료 포지션
+            if not closed_positions.empty:
+                st.subheader("✅ 청산 완료 (최근 5개)")
+                
+                recent_closed = closed_positions.tail(5)
+                summary_data = []
+                
+                for _, position in recent_closed.iterrows():
+                    summary_data.append({
+                        '종목명': position['종목명'],
+                        '진입일': position['진입일'],
+                        '진입가': f"{position['진입가']:,}원",
+                        '수량': f"{position['수량']:,}주",
+                        '손익': f"{position['손익']:+,}원",
+                        '수익률': f"{position['손익률']:+.2f}%"
+                    })
+                
+                st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
+        else:
+            st.info("📋 등록된 포지션이 없습니다. '신호 분석' 탭에서 진입 신호를 확인하고 포지션을 등록해주세요.")
+    
+    with tab3:
+        st.header("📊 차트 분석")
+        
+        if 'analysis_results' in st.session_state and 'tickers_dict' in st.session_state:
+            results_df = st.session_state['analysis_results']
+            tickers_dict = st.session_state['tickers_dict']
+            
+            # 종목 선택
+            selected_ticker = st.selectbox(
+                "차트를 분석할 종목 선택",
+                options=list(tickers_dict.keys()),
+                format_func=lambda x: f"{tickers_dict[x]} ({x})"
+            )
+            
+            if selected_ticker:
+                col_chart, col_info = st.columns([3, 1])
+                
+                with col_chart:
+                    with st.spinner("차트 데이터 로딩 중..."):
+                        df = turtle_system.get_market_data(selected_ticker, days=60)
+                        
+                        if df is not None and not df.empty:
+                            create_simple_chart(df, tickers_dict[selected_ticker])
+                        else:
+                            st.error("차트 데이터를 불러올 수 없습니다.")
+                
+                with col_info:
+                    # 종목 정보
+                    ticker_data = results_df[results_df['종목코드'] == selected_ticker]
+                    
+                    if not ticker_data.empty:
+                        ticker_info = ticker_data.iloc[0]
+                        
+                        st.markdown(f"### {ticker_info['종목명']}")
+                        st.markdown(f"**코드**: {ticker_info['종목코드']}")
+                        
+                        # 신호 상태
+                        if ticker_info['진입신호']:
+                            st.success("🟢 진입 신호")
+                        elif ticker_info['청산신호']:
+                            st.error("🔴 청산 신호")
+                        else:
+                            st.info("⚪ 신호 없음")
+                        
+                        # 주요 지표
+                        st.metric("현재가", f"{ticker_info['현재가']:,}원")
+                        st.metric("ATR(N)", f"{ticker_info['ATR(N)']:.2f}")
+                        
+                        st.markdown("**주요 가격대**")
+                        st.write(f"• 손절가: {ticker_info['손절가']:,}원")
+                        st.write(f"• 추가매수가: {ticker_info['추가매수1']:,}원")
+                        st.write(f"• Donchian상단: {ticker_info['Donchian상단']:,}원")
+                        st.write(f"• Donchian하단: {ticker_info['Donchian하단']:,}원")
+                        
+                        # 거래량 정보
+                        if ticker_info['거래량급증']:
+                            st.warning("⚡ 거래량 급증")
+                        else:
+                            st.info("📊 정상 거래량")
+        else:
+            st.info("먼저 '신호 분석' 탭에서 종목 분석을 실행해주세요.")
+    
+    with tab4:
+        st.header("📚 터틀 트레이딩 전략 가이드")
+        
+        # 전략 개요
+        st.markdown("""
+        ## 🐢 터틀 트레이딩이란?
+        
+        터틀 트레이딩은 1980년대 리처드 데니스가 개발한 **추세추종 전략**입니다.
+        감정을 배제하고 체계적인 규칙에 따라 거래하는 것이 핵심입니다.
+        """)
+        
+        # 핵심 규칙
+        rule_col1, rule_col2 = st.columns(2)
+        
+        with rule_col1:
+            st.markdown("""
+            ### 📈 진입 규칙
+            
+            **1️⃣ Donchian 상단 돌파**
+            - 종가가 20일 최고가 돌파시 진입
+            - 새로운 상승 추세의 시작 포착
+            
+            **2️⃣ ATR 기반 포지션 사이징**
+            - ATR(Average True Range)로 변동성 측정
+            - 거래당 리스크를 계좌의 2%로 제한
+            
+            **3️⃣ 피라미딩 (추가매수)**
+            - 수익 시 포지션 확대
+            - 최대 4단계까지 추가매수
+            """)
+        
+        with rule_col2:
+            st.markdown("""
+            ### 📉 청산 규칙
+            
+            **1️⃣ 손절 (Stop Loss)**
+            - 진입가 - 2N(ATR) 하락시 무조건 손절
+            - 감정 개입 완전 차단
+            
+            **2️⃣ 익절 (Profit Taking)**
+            - 10일 최저가 하회시 전량 매도
+            - 추세 반전 신호 조기 감지
+            
+            **3️⃣ 청산 우선순위**
+            - 손절 > 익절 > 추가매수
+            - 리스크 관리가 최우선
+            """)
+        
+        # 사용법 가이드
+        st.markdown("---")
+        st.markdown("## 🎯 웹앱 사용 가이드")
+        
+        st.markdown("""
+        ### 📝 단계별 사용법
+        
+        **1단계: 신호 분석**
+        1. '신호 분석' 탭에서 관심 종목 입력
+        2. '🔍 실시간 신호 분석 시작' 클릭
+        3. 진입 신호 발생 종목 확인
+        
+        **2단계: 실제 매수 & 기록**
+        1. 증권사 앱에서 **실제 매수** 실행
+        2. 웹앱에서 실제 체결가와 수량 입력
+        3. '➕ 포지션 추가'로 기록
+        
+        **3단계: 지속적 모니터링**
+        1. '포지션 관리' 탭에서 보유 현황 확인
+        2. '🔄 현재가 업데이트'로 손익 추적
+        3. 청산 신호 발생시 즉시 매도
+        
+        **4단계: 기록 관리**
+        1. '💾 백업 저장'으로 거래 기록 보관
+        2. '📊 차트 분석'으로 패턴 학습
+        3. 지속적인 전략 개선
+        """)
+        
+        # 주의사항
+        st.markdown("---")
+        st.markdown("## ⚠️ 중요한 주의사항")
+        
+        warning_col1, warning_col2 = st.columns(2)
+        
+        with warning_col1:
+            st.markdown("""
+            ### 🚫 하지 말아야 할 것들
+            - 감정적 판단으로 손절가 변경
+            - 신호 없는 임의 매수
+            - 과도한 레버리지 사용
+            - 포지션 기록 누락
+            """)
+        
+        with warning_col2:
+            st.markdown("""
+            ### ✅ 반드시 지켜야 할 것들
+            - **2% 룰** 철저히 준수
+            - **손절 신호** 즉시 실행
+            - **매일 포지션** 업데이트
+            - **체계적 기록** 유지
+            """)
+        
+        # 면책조항
+        st.markdown("---")
+        st.warning("""
+        **⚠️ 면책조항**
+        
+        이 웹앱은 교육 및 연구 목적으로 제작되었습니다.
+        - 실제 투자 손실에 대해 책임지지 않습니다
+        - 과거 수익률이 미래 수익을 보장하지 않습니다
+        - 모든 투자 결정은 신중히 하시기 바랍니다
+        - 충분한 백테스팅과 검증을 권장합니다
+        """)
+
+if __name__ == "__main__":
+    main()
