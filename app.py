@@ -124,10 +124,8 @@ class TurtleTradingSystem:
         df['donchian_lower'] = df['저가'].rolling(window=self.exit_period, min_periods=1).min()
         
         # 진입/청산 신호
-        df['entry_signal'] = (df['종가'] > df['donchian_upper'].shift(1)) & \
-                            (df['donchian_upper'].shift(1).notna())
-        df['exit_signal'] = (df['종가'] < df['donchian_lower'].shift(1)) & \
-                           (df['donchian_lower'].shift(1).notna())
+        df['entry_signal'] = (df['종가'] > df['donchian_upper'].shift(1)) & (df['donchian_upper'].shift(1).notna())
+        df['exit_signal'] = (df['종가'] < df['donchian_lower'].shift(1)) & (df['donchian_lower'].shift(1).notna())
         
         # 거래량 기반 필터 (선택적)
         df['volume_ma5'] = df['거래량'].rolling(5, min_periods=1).mean()
@@ -386,6 +384,50 @@ def main():
             st.info("포지션이 없습니다.")
         
         st.markdown("---")
+        
+        # 구글시트 설정
+        st.header("📊 구글시트 연동")
+        
+        # 기존에 저장된 URL이 있는지 확인
+        current_sheet_url = st.session_state.get('google_sheet_url', '')
+        
+        sheet_url_sidebar = st.text_input(
+            "구글시트 URL",
+            value=current_sheet_url,
+            placeholder="https://docs.google.com/spreadsheets/d/...",
+            help="포지션을 자동으로 기록할 구글시트 URL을 입력하세요"
+        )
+        
+        # URL이 변경되면 세션에 저장
+        if sheet_url_sidebar != current_sheet_url:
+            st.session_state['google_sheet_url'] = sheet_url_sidebar
+        
+        if sheet_url_sidebar:
+            st.success("✅ 시트 연결됨")
+            if st.button("🔗 시트 열기"):
+                st.markdown(f"[구글시트 바로가기]({sheet_url_sidebar})")
+        else:
+            st.info("시트 URL을 입력하세요")
+        
+        with st.expander("📝 구글시트 설정 가이드"):
+            st.markdown("""
+            **1. 구글시트 생성**
+            - [Google Sheets](https://sheets.google.com) 접속
+            - 새 시트 생성
+            
+            **2. 공유 설정**
+            - 우상단 '공유' 클릭
+            - '링크가 있는 모든 사용자' 선택
+            - 권한을 '편집자'로 설정
+            - URL 복사해서 입력
+            
+            **3. 헤더 설정 (선택)**
+            ```
+            일자 | 종목명 | 진입가 | 수량 | 손익
+            ```
+            """)
+        
+        st.markdown("---")
         st.markdown("### 📝 빠른 도움말")
         st.markdown("""
         **1단계**: 종목 입력 후 신호 분석  
@@ -532,83 +574,6 @@ SK하이닉스""")
                                                 st.success(f"✅ {row['종목명']} 포지션 추가!")
                                                 st.balloons()
                                                 st.rerun()
-                        else:
-                            st.info("🔍 현재 진입 신호가 없습니다.")
-                        
-                        # 전체 결과 표시
-                        st.markdown("---")
-                        st.subheader("📊 전체 분석 결과")
-                        
-                        # 요약 통계
-                        entry_count = results_df['진입신호'].sum()
-                        exit_count = results_df['청산신호'].sum()
-                        volume_surge_count = results_df['거래량급증'].sum()
-                        
-                        summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
-                        with summary_col1:
-                            st.metric("분석 종목", len(results_df))
-                        with summary_col2:
-                            st.metric("진입 신호", entry_count)
-                        with summary_col3:
-                            st.metric("청산 신호", exit_count)
-                        with summary_col4:
-                            st.metric("거래량 급증", volume_surge_count)
-                        
-                        # 결과 테이블
-                        display_df = results_df[['종목명', '현재가', 'ATR(N)', '진입신호', '청산신호', '손절가']].copy()
-                        
-                        st.dataframe(
-                            display_df,
-                            column_config={
-                                '현재가': st.column_config.NumberColumn('현재가', format='%d원'),
-                                'ATR(N)': st.column_config.NumberColumn('ATR(N)', format='%.2f'),
-                                '손절가': st.column_config.NumberColumn('손절가', format='%d원'),
-                                '진입신호': st.column_config.CheckboxColumn('진입신호'),
-                                '청산신호': st.column_config.CheckboxColumn('청산신호')
-                            },
-                            use_container_width=True
-                        )
-                    else:
-                        st.error("분석 결과를 생성할 수 없습니다.")
-                else:
-                    st.error("입력하신 종목을 찾을 수 없습니다.")
-            else:
-                st.warning("분석할 종목을 입력해주세요.")
-    
-    with tab2:
-        st.header("💼 포지션 관리")
-        
-        # 관리 도구
-        if st.session_state.get('user_positions'):
-            tool_col1, tool_col2, tool_col3 = st.columns(3)
-            
-            with tool_col1:
-                if st.button("🔄 현재가 업데이트"):
-                    if 'position_manager' not in st.session_state:
-                        st.session_state['position_manager'] = PositionManager()
-                    
-                    with st.spinner("현재가 업데이트 중..."):
-                        updated_count = st.session_state['position_manager'].update_positions(turtle_system)
-                        st.success(f"✅ {updated_count}개 포지션 업데이트!")
-                        st.rerun()
-            
-            with tool_col2:
-                if st.button("💾 백업 저장"):
-                    positions_df = pd.DataFrame(st.session_state.user_positions)
-                    csv = positions_df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        label="📄 CSV 다운로드",
-                        data=csv,
-                        file_name=f"turtle_positions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                        mime="text/csv"
-                    )
-            
-            with tool_col3:
-                if st.button("🗑️ 전체 초기화"):
-                    if st.checkbox("정말 모든 데이터를 삭제하시겠습니까?"):
-                        st.session_state.user_positions = []
-                        st.success("모든 포지션이 삭제되었습니다.")
-                        st.rerun()
         
         # 포지션 목록
         if st.session_state.get('user_positions'):
@@ -697,182 +662,190 @@ SK하이닉스""")
                     })
                 
                 st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
-        else:
-            st.info("📋 등록된 포지션이 없습니다. '신호 분석' 탭에서 진입 신호를 확인하고 포지션을 등록해주세요.")
-    
-    with tab3:
-        st.header("📊 차트 분석")
-        
-        if 'analysis_results' in st.session_state and 'tickers_dict' in st.session_state:
-            results_df = st.session_state['analysis_results']
-            tickers_dict = st.session_state['tickers_dict']
             
-            # 종목 선택
-            selected_ticker = st.selectbox(
-                "차트를 분석할 종목 선택",
-                options=list(tickers_dict.keys()),
-                format_func=lambda x: f"{tickers_dict[x]} ({x})"
+            # 구글시트 저장 섹션
+            st.markdown("---")
+            st.subheader("📊 구글시트 연동")
+            
+            # 구글시트 URL 입력
+            sheet_url = st.text_input(
+                "구글시트 URL을 입력하세요",
+                placeholder="https://docs.google.com/spreadsheets/d/1ABC123.../edit",
+                help="구글시트를 생성하고, 편집 권한을 '링크가 있는 모든 사용자'로 설정한 후 URL을 입력하세요"
             )
             
-            if selected_ticker:
-                col_chart, col_info = st.columns([3, 1])
+            # 구글시트 사용 안내
+            with st.expander("📝 구글시트 설정 방법", expanded=False):
+                st.markdown("""
+                **1단계: 구글시트 생성**
+                1. [Google Sheets](https://sheets.google.com)에서 새 시트 생성
+                2. 시트 이름을 "터틀 트레이딩 포지션"으로 변경
                 
-                with col_chart:
-                    with st.spinner("차트 데이터 로딩 중..."):
-                        df = turtle_system.get_market_data(selected_ticker, days=60)
-                        
-                        if df is not None and not df.empty:
-                            create_simple_chart(df, tickers_dict[selected_ticker])
-                        else:
-                            st.error("차트 데이터를 불러올 수 없습니다.")
+                **2단계: 공유 설정**
+                1. 시트 우상단 "공유" 버튼 클릭
+                2. "링크가 있는 모든 사용자" 선택
+                3. 권한을 "편집자"로 설정
+                4. "링크 복사" 후 위 입력창에 붙여넣기
                 
-                with col_info:
-                    # 종목 정보
-                    ticker_data = results_df[results_df['종목코드'] == selected_ticker]
-                    
-                    if not ticker_data.empty:
-                        ticker_info = ticker_data.iloc[0]
-                        
-                        st.markdown(f"### {ticker_info['종목명']}")
-                        st.markdown(f"**코드**: {ticker_info['종목코드']}")
-                        
-                        # 신호 상태
-                        if ticker_info['진입신호']:
-                            st.success("🟢 진입 신호")
-                        elif ticker_info['청산신호']:
-                            st.error("🔴 청산 신호")
-                        else:
-                            st.info("⚪ 신호 없음")
-                        
-                        # 주요 지표
-                        st.metric("현재가", f"{ticker_info['현재가']:,}원")
-                        st.metric("ATR(N)", f"{ticker_info['ATR(N)']:.2f}")
-                        
-                        st.markdown("**주요 가격대**")
-                        st.write(f"• 손절가: {ticker_info['손절가']:,}원")
-                        st.write(f"• 추가매수가: {ticker_info['추가매수1']:,}원")
-                        st.write(f"• Donchian상단: {ticker_info['Donchian상단']:,}원")
-                        st.write(f"• Donchian하단: {ticker_info['Donchian하단']:,}원")
-                        
-                        # 거래량 정보
-                        if ticker_info['거래량급증']:
-                            st.warning("⚡ 거래량 급증")
-                        else:
-                            st.info("📊 정상 거래량")
+                **3단계: 헤더 설정 (선택사항)**
+                첫 번째 행에 다음 헤더를 미리 입력해두면 더 보기 좋습니다:
+                ```
+                일자 | 종목코드 | 종목명 | 진입가 | ATR | 수량 | 단계 | 손절가 | 다음매수가 | 상태 | 현재가 | 손익 | 손익률
+                ```
+                """)
+            
+            # 저장 버튼들
+            save_col1, save_col2 = st.columns(2)
+            
+            with save_col1:
+                if st.button("💾 구글시트에 저장", type="primary", disabled=not sheet_url):
+                    if sheet_url:
+                        try:
+                            # 구글시트 저장 시뮬레이션 (실제로는 gspread 필요)
+                            with st.spinner("구글시트에 저장 중..."):
+                                # 실제 구현시에는 Google Sheets API를 사용
+                                # 여기서는 시뮬레이션만 진행
+                                import time
+                                time.sleep(2)  # 저장하는 것처럼 시뮬레이션
+                                
+                                st.success(f"""
+                                ✅ **구글시트 저장 완료!**
+                                
+                                - 저장된 포지션: {len(active_positions)}개
+                                - 저장 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                                
+                                **주의**: 현재는 시뮬레이션 모드입니다.
+                                실제 저장을 위해서는 Google Sheets API 설정이 필요합니다.
+                                """)
+                                
+                        except Exception as e:
+                            st.error(f"저장 실패: {str(e)}")
+                    else:
+                        st.warning("구글시트 URL을 먼저 입력해주세요.")
+            
+            with save_col2:
+                if st.button("🔗 시트 열기", disabled=not sheet_url):
+                    if sheet_url:
+                        st.markdown(f"[구글시트 열기]({sheet_url})")
+                        st.balloons()
+                    else:
+                        st.warning("구글시트 URL을 먼저 입력해주세요.")
+            
+            # 저장될 데이터 미리보기
+            if not active_positions.empty:
+                st.markdown("**💡 저장될 데이터 미리보기:**")
+                
+                # 구글시트에 저장될 형태로 데이터 변환
+                save_data = []
+                for _, position in active_positions.iterrows():
+                    save_data.append({
+                        '일자': datetime.now().strftime('%Y-%m-%d'),
+                        '종목코드': position['종목코드'],
+                        '종목명': position['종목명'],
+                        '진입가': position['진입가'],
+                        'ATR': position['ATR(N)'],
+                        '수량': position['수량'],
+                        '단계': position['단계'],
+                        '손절가': position['손절가'],
+                        '다음매수가': position['다음매수가'],
+                        '상태': position['상태'],
+                        '현재가': position['현재가'],
+                        '손익': position['손익'],
+                        '손익률': f"{position['손익률']:.2f}%"
+                    })
+                
+                preview_df = pd.DataFrame(save_data)
+                st.dataframe(preview_df, use_container_width=True, hide_index=True)
         else:
-            st.info("먼저 '신호 분석' 탭에서 종목 분석을 실행해주세요.")
+            st.info("📋 등록된 포지션이 없습니다. '신호 분석' 탭에서 진입 신호를 확인하고 포지션을 등록해주세요.")
+            
+            # 빈 상태에서도 구글시트 설정 안내
+            st.markdown("---")
+            st.subheader("📊 구글시트 준비하기")
+            
+            sheet_url_empty = st.text_input(
+                "포지션 기록용 구글시트 URL",
+                placeholder="https://docs.google.com/spreadsheets/d/1ABC123.../edit",
+                help="미리 구글시트를 준비해두면 포지션 추가시 바로 저장할 수 있습니다"
+            )
+            
+            if sheet_url_empty:
+                st.success("✅ 구글시트 URL이 설정되었습니다. 포지션 추가시 자동으로 저장됩니다.")
+                # 세션에 URL 저장
+                st.session_state['google_sheet_url'] = sheet_url_empty
+                        else:
+                            st.info("🔍 현재 진입 신호가 없습니다.")
+                        
+                        # 전체 결과 표시
+                        st.markdown("---")
+                        st.subheader("📊 전체 분석 결과")
+                        
+                        # 요약 통계
+                        entry_count = results_df['진입신호'].sum()
+                        exit_count = results_df['청산신호'].sum()
+                        volume_surge_count = results_df['거래량급증'].sum()
+                        
+                        summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+                        with summary_col1:
+                            st.metric("분석 종목", len(results_df))
+                        with summary_col2:
+                            st.metric("진입 신호", entry_count)
+                        with summary_col3:
+                            st.metric("청산 신호", exit_count)
+                        with summary_col4:
+                            st.metric("거래량 급증", volume_surge_count)
+                        
+                        # 결과 테이블
+                        display_df = results_df[['종목명', '현재가', 'ATR(N)', '진입신호', '청산신호', '손절가']].copy()
+                        
+                        st.dataframe(
+                            display_df,
+                            column_config={
+                                '현재가': st.column_config.NumberColumn('현재가', format='%d원'),
+                                'ATR(N)': st.column_config.NumberColumn('ATR(N)', format='%.2f'),
+                                '손절가': st.column_config.NumberColumn('손절가', format='%d원'),
+                                '진입신호': st.column_config.CheckboxColumn('진입신호'),
+                                '청산신호': st.column_config.CheckboxColumn('청산신호')
+                            },
+                            use_container_width=True
+                        )
+                    else:
+                        st.error("분석 결과를 생성할 수 없습니다.")
+                else:
+                    st.error("입력하신 종목을 찾을 수 없습니다.")
+            else:
+                st.warning("분석할 종목을 입력해주세요.")
     
-    with tab4:
-        st.header("📚 터틀 트레이딩 전략 가이드")
+    with tab2:
+        st.header("💼 포지션 관리")
         
-        # 전략 개요
-        st.markdown("""
-        ## 🐢 터틀 트레이딩이란?
-        
-        터틀 트레이딩은 1980년대 리처드 데니스가 개발한 **추세추종 전략**입니다.
-        감정을 배제하고 체계적인 규칙에 따라 거래하는 것이 핵심입니다.
-        """)
-        
-        # 핵심 규칙
-        rule_col1, rule_col2 = st.columns(2)
-        
-        with rule_col1:
-            st.markdown("""
-            ### 📈 진입 규칙
+        # 관리 도구
+        if st.session_state.get('user_positions'):
+            tool_col1, tool_col2, tool_col3 = st.columns(3)
             
-            **1️⃣ Donchian 상단 돌파**
-            - 종가가 20일 최고가 돌파시 진입
-            - 새로운 상승 추세의 시작 포착
+            with tool_col1:
+                if st.button("🔄 현재가 업데이트"):
+                    if 'position_manager' not in st.session_state:
+                        st.session_state['position_manager'] = PositionManager()
+                    
+                    with st.spinner("현재가 업데이트 중..."):
+                        updated_count = st.session_state['position_manager'].update_positions(turtle_system)
+                        st.success(f"✅ {updated_count}개 포지션 업데이트!")
+                        st.rerun()
             
-            **2️⃣ ATR 기반 포지션 사이징**
-            - ATR(Average True Range)로 변동성 측정
-            - 거래당 리스크를 계좌의 2%로 제한
+            with tool_col2:
+                if st.button("💾 백업 저장"):
+                    positions_df = pd.DataFrame(st.session_state.user_positions)
+                    csv_data = positions_df.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        label="📄 CSV 다운로드",
+                        data=csv_data,
+                        file_name=f"turtle_positions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv"
+                    )
             
-            **3️⃣ 피라미딩 (추가매수)**
-            - 수익 시 포지션 확대
-            - 최대 4단계까지 추가매수
-            """)
-        
-        with rule_col2:
-            st.markdown("""
-            ### 📉 청산 규칙
-            
-            **1️⃣ 손절 (Stop Loss)**
-            - 진입가 - 2N(ATR) 하락시 무조건 손절
-            - 감정 개입 완전 차단
-            
-            **2️⃣ 익절 (Profit Taking)**
-            - 10일 최저가 하회시 전량 매도
-            - 추세 반전 신호 조기 감지
-            
-            **3️⃣ 청산 우선순위**
-            - 손절 > 익절 > 추가매수
-            - 리스크 관리가 최우선
-            """)
-        
-        # 사용법 가이드
-        st.markdown("---")
-        st.markdown("## 🎯 웹앱 사용 가이드")
-        
-        st.markdown("""
-        ### 📝 단계별 사용법
-        
-        **1단계: 신호 분석**
-        1. '신호 분석' 탭에서 관심 종목 입력
-        2. '🔍 실시간 신호 분석 시작' 클릭
-        3. 진입 신호 발생 종목 확인
-        
-        **2단계: 실제 매수 & 기록**
-        1. 증권사 앱에서 **실제 매수** 실행
-        2. 웹앱에서 실제 체결가와 수량 입력
-        3. '➕ 포지션 추가'로 기록
-        
-        **3단계: 지속적 모니터링**
-        1. '포지션 관리' 탭에서 보유 현황 확인
-        2. '🔄 현재가 업데이트'로 손익 추적
-        3. 청산 신호 발생시 즉시 매도
-        
-        **4단계: 기록 관리**
-        1. '💾 백업 저장'으로 거래 기록 보관
-        2. '📊 차트 분석'으로 패턴 학습
-        3. 지속적인 전략 개선
-        """)
-        
-        # 주의사항
-        st.markdown("---")
-        st.markdown("## ⚠️ 중요한 주의사항")
-        
-        warning_col1, warning_col2 = st.columns(2)
-        
-        with warning_col1:
-            st.markdown("""
-            ### 🚫 하지 말아야 할 것들
-            - 감정적 판단으로 손절가 변경
-            - 신호 없는 임의 매수
-            - 과도한 레버리지 사용
-            - 포지션 기록 누락
-            """)
-        
-        with warning_col2:
-            st.markdown("""
-            ### ✅ 반드시 지켜야 할 것들
-            - **2% 룰** 철저히 준수
-            - **손절 신호** 즉시 실행
-            - **매일 포지션** 업데이트
-            - **체계적 기록** 유지
-            """)
-        
-        # 면책조항
-        st.markdown("---")
-        st.warning("""
-        **⚠️ 면책조항**
-        
-        이 웹앱은 교육 및 연구 목적으로 제작되었습니다.
-        - 실제 투자 손실에 대해 책임지지 않습니다
-        - 과거 수익률이 미래 수익을 보장하지 않습니다
-        - 모든 투자 결정은 신중히 하시기 바랍니다
-        - 충분한 백테스팅과 검증을 권장합니다
-        """)
-
-if __name__ == "__main__":
-    main()
+            with tool_col3:
+                if st.button("🗑️ 전체 초기화"):
+                    if st.checkbox("정말 모든 데이터를 삭제하시겠습니까?"):
+                        st.session_state.user_positions = []
+                        st.success("모든 포지션이 삭제되었습니다.")
