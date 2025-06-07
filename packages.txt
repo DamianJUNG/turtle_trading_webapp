@@ -1,7 +1,5 @@
-streamlit==1.28.0
-pandas==2.0.3
-numpy==1.24.3
-pykrx
-requests
-lxml
-beautifulsoup4
+
+libxml2-dev
+libxslt1-dev
+python3-dev
+build-essential
